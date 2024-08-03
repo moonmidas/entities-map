@@ -1,0 +1,17 @@
+{
+  "name": "entities-map",
+  "version": "1.0.0",
+  "description": "<h1 align=\"center\">Wikipedia Map</h1> <p align=\"center\">A web app for visualizing the connections between Wikipedia pages. Try it at <a href=\"https://wikipedia.luk.ke/\">wikipedia.luk.ke</a>.</p>",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "openai": "^4.54.0"
+  }
+}

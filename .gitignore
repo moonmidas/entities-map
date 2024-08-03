@@ -12,3 +12,4 @@ dev
 # graphs/*.json
 
 node_modules
+.env
