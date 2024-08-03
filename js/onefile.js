@@ -1,11 +1,11 @@
-async function queryLLM(prompt) {
+async function queryLLM(prompt, existingNodes, parentNode) {
     try {
       const response = await fetch('http://localhost:3000/query-llm', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt, existingNodes, parentNode })
       });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -19,7 +19,6 @@ async function queryLLM(prompt) {
       return '';
     }
   }
-
 /* global getNormalizedId */
 const base = 'https://en.wikipedia.org/w/api.php';
 
@@ -108,11 +107,21 @@ function getWikiLinks(element) {
 // }
 
 async function getSubPages(pageName) {
+    const existingNodes = nodes.get().map(node => node.label);
+    const parentNode = pageName;
     const prompt = `${pageName}`;
-    const response = await queryLLM(prompt);
-    const links = response.split('\n').map(item => item.trim()).filter(item => item);
+    const response = await queryLLM(prompt, existingNodes, parentNode);
+    const links = response.split('\n').map(item => {
+      const [entity, strength, relatedNodes] = item.trim().split('|');
+      const relatedNodesMap = relatedNodes ? relatedNodes.split(',').reduce((acc, rel) => {
+        const [node, str] = rel.split(':');
+        acc[node] = parseFloat(str);
+        return acc;
+      }, {}) : {};
+      return { entity, strength: parseFloat(strength), relatedNodes: relatedNodesMap };
+    }).filter(item => item.entity);
     return {
-      redirectedTo: pageName, // No redirects in LLM version
+      redirectedTo: pageName,
       links: links
     };
   }
@@ -424,11 +433,11 @@ function expandNodeCallback(page, data) {
     const [x, y] = getSpawnPosition(page);
   
     subpages.forEach(subpage => {
-      const subpageID = getNormalizedId(subpage);
+      const subpageID = getNormalizedId(subpage.entity);
       if (!nodes.getIds().includes(subpageID)) {
         subnodes.push({
           id: subpageID,
-          label: wordwrap(subpage, 15),
+          label: wordwrap(subpage.entity, 15),
           value: 1,
           level,
           color: getColor(level),
@@ -442,30 +451,57 @@ function expandNodeCallback(page, data) {
         newedges.push({
           from: page,
           to: subpageID,
-          color: getEdgeColor(level),
+          color: getEdgeColorByStrength(subpage.strength),
           level,
           selectionWidth: 2,
           hoverWidth: 0,
+          strength: subpage.strength
         });
       }
+  
+      // Add edges for related nodes, excluding the parent
+      Object.entries(subpage.relatedNodes).forEach(([relatedNode, strength]) => {
+        const relatedNodeID = getNormalizedId(relatedNode);
+        if (relatedNodeID !== page && nodes.getIds().includes(relatedNodeID) && !getEdgeConnecting(subpageID, relatedNodeID)) {
+          newedges.push({
+            from: subpageID,
+            to: relatedNodeID,
+            color: getEdgeColorByStrength(strength),
+            level: Math.min(nodes.get(relatedNodeID).level, level),
+            selectionWidth: 2,
+            hoverWidth: 0,
+            strength: strength
+          });
+        }
+      });
     });
   
     nodes.add(subnodes);
     edges.add(newedges);
   }
 
+// 
+function getEdgeColorByStrength(strength) {
+    // Interpolate between red (weak) and green (strong)
+    const r = Math.round(255 * (1 - strength));
+    const g = Math.round(255 * strength);
+    return `rgb(${r},${g},0)`;
+}
+
 // Expand a node without freezing other stuff
 function expandNode(id) {
-  const pagename = unwrap(nodes.get(id).label);
-  getSubPages(pagename).then(({ redirectedTo, links }) => {
-    const newId = renameNode(id, redirectedTo);
-    expandNodeCallback(newId, links);
-  });
-  // Mark the expanded node as 'locked' if it's one of the commafield items
-  const cf = document.getElementById('input');
-  const cfItem = cf.querySelector(`.item[data-node-id="${id}"]`);
-  if (cfItem) cfItem.classList.add('locked');
-}
+    const pagename = unwrap(nodes.get(id).label);
+    getSubPages(pagename).then(({ redirectedTo, links }) => {
+      const newId = renameNode(id, redirectedTo);
+      expandNodeCallback(newId, links);
+      // Mark the node as expanded
+      nodes.update({ id: newId, expanded: true });
+    });
+    // Mark the expanded node as 'locked' if it's one of the commafield items
+    const cf = document.getElementById('input');
+    const cfItem = cf.querySelector(`.item[data-node-id="${id}"]`);
+    if (cfItem) cfItem.classList.add('locked');
+  }
 
 // Get all the nodes tracing back to the start node.
 function getTraceBackNodes(node) {
@@ -998,10 +1034,23 @@ function getFloatingEdges() {
 
 
 // Functions that will be used as bindings
-function expandEvent(params) { // Expand a node (with event handler)
-    if (params.nodes.length) { // Did the click occur on a node?
-      const page = params.nodes[0]; // The id of the node clicked
-      expandNode(page);
+function expandEvent(params) {
+    if (params.nodes.length) {
+      const nodeId = params.nodes[0];
+      const node = nodes.get(nodeId);
+      
+      // Check if the node has already been expanded
+      if (node.expanded) {
+        // If already expanded, open the Wikipedia page instead
+        const page = encodeURIComponent(unwrap(node.label));
+        const url = `http://en.wikipedia.org/wiki/${page}`;
+        window.open(url, '_blank');
+      } else {
+        // If not expanded, expand the node
+        expandNode(nodeId);
+        // Mark the node as expanded
+        nodes.update({ id: nodeId, expanded: true });
+      }
     }
   }
   
@@ -1025,19 +1074,27 @@ function expandEvent(params) { // Expand a node (with event handler)
     }
   }
   
-  // Bind the network events
   function bindNetwork() {
-    if (isTouchDevice) { // Device has touchscreen
-      network.on('hold', expandEvent); // Long press to expand
-      network.on('click', mobileTraceEvent); // Highlight traceback on click
-    } else { // Device does not have touchscreen
-      network.on('click', expandEvent); // Expand on click
-      network.on('hoverNode', params => traceBack(params.node)); // Highlight traceback on hover
-      network.on('blurNode', resetProperties); // un-traceback on un-hover
+    if (isTouchDevice) {
+      // For touch devices, we'll keep the long press to expand
+      network.on('hold', expandEvent);
+      network.on('click', mobileTraceEvent);
+    } else {
+      // For non-touch devices, we'll use double-click to expand
+      network.on('doubleClick', expandEvent);
+      network.on('click', (params) => {
+        if (params.nodes.length) {
+          traceBack(params.nodes[0]);
+        } else {
+          resetProperties();
+        }
+      });
+      network.on('hoverNode', params => traceBack(params.node));
+      network.on('blurNode', resetProperties);
     }
   
-    // Bind double-click to open page
-    network.on('doubleClick', openPageEvent);
+    // Remove the previous double-click binding for opening Wikipedia page
+    // network.off('doubleClick', openPageEvent);
   }
   
   function bind() {
