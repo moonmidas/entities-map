@@ -1081,13 +1081,14 @@ function expandEvent(params) {
       network.on('click', mobileTraceEvent);
     } else {
       // For non-touch devices, we'll use double-click to expand
-      network.on('doubleClick', expandEvent);
+    //   network.on('doubleClick', onNodeClick);
       network.on('click', (params) => {
         if (params.nodes.length) {
           traceBack(params.nodes[0]);
         } else {
           resetProperties();
         }
+        onNodeClick(params)
       });
       network.on('hoverNode', params => traceBack(params.node));
       network.on('blurNode', resetProperties);
@@ -1410,3 +1411,25 @@ function Progress(title = '', mainclass = '', barclass = '') {
   // Update UI text
 document.querySelector('#input').setAttribute('data-placeholder', 'Enter a topic...');
 document.querySelector('#submit').textContent = 'Explore';
+
+// Function to show the expand menu with the expand topic button
+function showExpandMenu(nodeId) {
+    const menu = document.getElementById('menu');
+    const expandButton = document.getElementById('expand-topic');
+    expandButton.style.display = 'block';
+    const topicName = document.getElementById('topic-name');
+    topicName.innerText = nodeId;
+    topicName.style.display = 'block';
+  
+    expandButton.onclick = function() {
+      expandNode(nodeId);
+    };
+  }
+
+  // Event handler for node click
+function onNodeClick(params) {
+    if (params.nodes.length) {
+      const nodeId = params.nodes[0];
+      showExpandMenu(nodeId);
+    }
+  }

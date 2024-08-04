@@ -3,26 +3,28 @@
   position: fixed;
   bottom: 8px;
   right: 8px;
-  width: 40px;
+
+  display: flex;
+  flex-direction: row; /* Change to row for horizontal layout */
 
   z-index: 2;
-  border-radius: 7px;
+  border-radius: 0px;
   overflow: visible;
-  border: 1px solid #aaa;
+  border: 0px solid #aaa;
 }
 
 .button-container button {
   display: block;
-  width: 100%;
+  width: 40px; 
   height: 40px;
   padding: 5px;
   margin: 0;
-
+  
   background-color: transparent;
-  border: none;
-  border-top: 1px solid #aaa;
+  /* border: none; */
+  border: 1px solid #aaa; /* Changed to border-left for horizontal layout */
 }
 
 .button-container button:first-of-type {
-  border-top: none;
+  /* border-left: none; Changed to border-left for horizontal layout */
 }

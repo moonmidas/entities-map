@@ -16,6 +16,8 @@ const openai = new OpenAI({
 app.post('/query-llm', async (req, res) => {
     try {
       const { prompt, existingNodes, parentNode } = req.body;
+      console.log("Prompt:", prompt)
+      console.log("Existing Nodes:", existingNodes)
       const response = await openai.chat.completions.create({
         model: 'gpt-4o-2024-05-13',
         messages: [

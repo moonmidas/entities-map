@@ -13,6 +13,7 @@
   left: 0;
   width: 100vw;
   z-index: 1;
+  height: 33px; /* Set the height */
 
   /* Appearance */
   box-shadow: 0 4px 4px -2px #ccc;
