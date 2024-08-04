@@ -70,19 +70,20 @@ body {
   text-transform: capitalize;
 }
 
-#expand-topic {
+.expand-topics {
   display: block; /* Make the button a block element */
   width: 100%; /* Occupy the full width of the container */
   padding: 10px; /* Add some padding for a better look */
+  margin-bottom: 3px;
   font-size: 16px; /* Increase the font size */
-  background-color: #007bff; /* Add a background color */
+  background-color: #333; /* Add a background color */
   color: white; /* Change the text color to white */
   border: none; /* Remove the border */
   border-radius: 5px; /* Add some border-radius for rounded corners */
   cursor: pointer; /* Change the cursor to a pointer */
 }
 
-#expand-topic:hover {
+.expand-topics:hover {
   background-color: #0056b3; /* Change the background color on hover */
 }
 

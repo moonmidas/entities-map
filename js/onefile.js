@@ -1,24 +1,24 @@
-async function queryLLM(prompt, existingNodes, parentNode) {
+async function queryLLM(prompt, parentNodes) {
     try {
-      const response = await fetch('http://localhost:3000/query-llm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ prompt, existingNodes, parentNode })
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      console.log(response);
-      return data.result;
+        const response = await fetch('http://localhost:3000/query-llm', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ prompt, parentNodes })
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log(response);
+        return data.result;
     } catch (error) {
-      console.error('Error querying LLM:', error);
-      return '';
+        console.error('Error querying LLM:', error);
+        return '';
     }
-  }
+}
 /* global getNormalizedId */
 const base = 'https://en.wikipedia.org/w/api.php';
 
@@ -106,25 +106,25 @@ function getWikiLinks(element) {
 //   }));
 // }
 
-async function getSubPages(pageName) {
-    const existingNodes = nodes.get().map(node => node.label);
-    const parentNode = pageName;
+async function getSubPages(pageName, parentNodes = []) {
     const prompt = `${pageName}`;
-    const response = await queryLLM(prompt, existingNodes, parentNode);
+    console.log("Parents Nodes in getSubPages:", parentNodes)
+    const response = await queryLLM(prompt, parentNodes);
     const links = response.split('\n').map(item => {
-      const [entity, strength, relatedNodes] = item.trim().split('|');
-      const relatedNodesMap = relatedNodes ? relatedNodes.split(',').reduce((acc, rel) => {
-        const [node, str] = rel.split(':');
-        acc[node] = parseFloat(str);
-        return acc;
-      }, {}) : {};
-      return { entity, strength: parseFloat(strength), relatedNodes: relatedNodesMap };
+        const [entity, strength, relatedNodes] = item.trim().split('|');
+        const relatedNodesMap = relatedNodes ? relatedNodes.split(',').reduce((acc, rel) => {
+            const [node, str] = rel.split(':');
+            acc[node] = parseFloat(str);
+            return acc;
+        }, {}) : {};
+        return { entity, strength: parseFloat(strength), relatedNodes: relatedNodesMap };
     }).filter(item => item.entity);
     return {
-      redirectedTo: pageName,
-      links: links
+        redirectedTo: pageName,
+        links: links
     };
-  }
+}
+
 
 /**
  * Get the name of a random Wikipedia article
@@ -427,11 +427,11 @@ function expandNodeCallback(page, data) {
     const node = nodes.get(page);
     const level = node.level + 1;
     const subpages = data;
-  
+
     const subnodes = [];
     const newedges = [];
     const [x, y] = getSpawnPosition(page);
-  
+
     subpages.forEach(subpage => {
       const subpageID = getNormalizedId(subpage.entity);
       if (!nodes.getIds().includes(subpageID)) {
@@ -446,7 +446,7 @@ function expandNodeCallback(page, data) {
           y,
         });
       }
-  
+
       if (!getEdgeConnecting(page, subpageID)) {
         newedges.push({
           from: page,
@@ -458,7 +458,7 @@ function expandNodeCallback(page, data) {
           strength: subpage.strength
         });
       }
-  
+
       // Add edges for related nodes, excluding the parent
       Object.entries(subpage.relatedNodes).forEach(([relatedNode, strength]) => {
         const relatedNodeID = getNormalizedId(relatedNode);
@@ -475,10 +475,10 @@ function expandNodeCallback(page, data) {
         }
       });
     });
-  
+
     nodes.add(subnodes);
     edges.add(newedges);
-  }
+}
 
 // 
 function getEdgeColorByStrength(strength) {
@@ -489,19 +489,27 @@ function getEdgeColorByStrength(strength) {
 }
 
 // Expand a node without freezing other stuff
-function expandNode(id) {
-    const pagename = unwrap(nodes.get(id).label);
-    getSubPages(pagename).then(({ redirectedTo, links }) => {
-      const newId = renameNode(id, redirectedTo);
-      expandNodeCallback(newId, links);
-      // Mark the node as expanded
-      nodes.update({ id: newId, expanded: true });
-    });
-    // Mark the expanded node as 'locked' if it's one of the commafield items
-    const cf = document.getElementById('input');
-    const cfItem = cf.querySelector(`.item[data-node-id="${id}"]`);
-    if (cfItem) cfItem.classList.add('locked');
-  }
+async function expandNodeWithParentNodes(id) {
+    const node = nodes.get(id);
+    const parentNodes = getTraceBackNodes(id).map(n => nodes.get(n).label);
+    console.log("Parent Nodes:", parentNodes);
+    const pagename = unwrap(node.label);
+    const { redirectedTo, links } = await getSubPages(pagename, parentNodes);
+    const newId = renameNode(id, redirectedTo);
+    expandNodeCallback(newId, links);
+    nodes.update({ id: newId, expanded: true });
+}
+
+async function expandNode(id) {
+    const node = nodes.get(id);
+    //const parentNodes = getTraceBackNodes(id).map(n => nodes.get(n).label);
+    //console.log("Parent Nodes:", parentNodes);
+    const pagename = unwrap(node.label);
+    const { redirectedTo, links } = await getSubPages(pagename, []);
+    const newId = renameNode(id, redirectedTo);
+    expandNodeCallback(newId, links);
+    nodes.update({ id: newId, expanded: true });
+}
 
 // Get all the nodes tracing back to the start node.
 function getTraceBackNodes(node) {
@@ -732,6 +740,18 @@ const options = {
     hoverConnectedEdges: false,
     selectConnectedEdges: true,
   },
+  physics: {
+    enabled: true,
+    barnesHut: {
+        gravitationalConstant: -10000,
+        centralGravity: 0.3,
+        springLength: 30,
+        springConstant: 0.05,
+        damping: 0.09,
+        avoidOverlap: 1
+    },
+    solver: 'barnesHut'
+  }
 };
 
 nodes = new vis.DataSet();
@@ -1415,15 +1435,20 @@ document.querySelector('#submit').textContent = 'Explore';
 // Function to show the expand menu with the expand topic button
 function showExpandMenu(nodeId) {
     const menu = document.getElementById('menu');
-    const expandButton = document.getElementById('expand-topic');
-    expandButton.style.display = 'block';
+    const expandTopicButton = document.getElementById('expand-topic');
+    expandTopicButton.style.display = 'block';
+    const expandTopicWithParentNodesButton = document.getElementById('expand-topic-parent-nodes');
+    expandTopicWithParentNodesButton.style.display = 'block';
     const topicName = document.getElementById('topic-name');
     topicName.innerText = nodeId;
     topicName.style.display = 'block';
   
-    expandButton.onclick = function() {
-      expandNode(nodeId);
+    expandTopicWithParentNodesButton.onclick = function() {
+      expandNodeWithParentNodes(nodeId);
     };
+    expandTopicButton.onclick = function() {
+        expandNode(nodeId);
+      };
   }
 
   // Event handler for node click
