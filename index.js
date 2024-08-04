@@ -15,9 +15,18 @@ const openai = new OpenAI({
 
 app.post('/query-llm', async (req, res) => {
     try {
-        const { prompt, parentNodes } = req.body;
+        const { prompt, parentNodes, existingNodes } = req.body;
         console.log("Prompt:", prompt);
         console.log("Parent Node:", parentNodes);
+        console.log("Existing Nodes:", existingNodes);
+
+
+        parentNodes.forEach(node => {
+            node = node.replace("\n", "");
+        });
+        const parentNodesString = Array.isArray(parentNodes) ? parentNodes.join(',') : '';
+        const existingNodesString = Array.isArray(existingNodes) ? existingNodes.join(',') : '';
+
         const response = await openai.chat.completions.create({
             model: 'gpt-4o-2024-05-13',
             messages: [
@@ -26,26 +35,29 @@ app.post('/query-llm', async (req, res) => {
                     content: `
                         <INSTRUCTIONS>
                         Generate a list of 5-10 entities that are related to the given topic.
-                        Consider the existing nodes provided and their potential relationships to the new entities, 
-                        but exclude the direct parent node from these relationships.
+                        Consider the existing nodes provided and their potential relationships to the new entities.
                         For each entity, provide a strength value between 0 and 1 indicating how strongly it's related to the topic.
-                        If the entity is related to any existing nodes (except the parent), list those relationships.
-                        Do not use markdown.
+                        If the entity is related to any existing nodes, list those relationships.
+                        If an entity is very similar to an existing node (e.g., "Framing Effect" and "Framing", or "Pathos" and "Emotional Appeal"), merge them and use the existing node name.
+                        Never suggest entities that are already in the list of existing nodes.
+                        Never link entities to themselves.
+                        Never return the entities in brackets.
+                        Never use markdown.
                         </INSTRUCTIONS>
                         <FORMAT>
-                        [ENTITY 1]|[STRENGTH 1]|[RELATED_NODE_1:STRENGTH,RELATED_NODE_2:STRENGTH,...]
-                        [ENTITY 2]|[STRENGTH 2]|[RELATED_NODE_1:STRENGTH,RELATED_NODE_2:STRENGTH,...]
-                        [ENTITY 3]|[STRENGTH 3]|[RELATED_NODE_1:STRENGTH,RELATED_NODE_2:STRENGTH,...]
+                        [ENTITY 1]|[STRENGTH 1]|[RELATED_NODE_1:STRENGTH,RELATED_NODE_2:STRENGTH,...]|[MERGED_WITH]
+                        [ENTITY 2]|[STRENGTH 2]|[RELATED_NODE_1:STRENGTH,RELATED_NODE_2:STRENGTH,...]|[MERGED_WITH]
+                        [ENTITY 3]|[STRENGTH 3]|[RELATED_NODE_1:STRENGTH,RELATED_NODE_2:STRENGTH,...]|[MERGED_WITH]
                         ...
                         </FORMAT>
                     `
                 },
                 {
                     role: 'user',
-                    content: `<TOPIC>${prompt}</TOPIC><PARENT_NODES>${parentNodes.join(',')}</PARENT_NODES>`
+                    content: `<TOPIC>${prompt}</TOPIC><PARENT_NODES>${parentNodesString}</PARENT_NODES><EXISTING_NODES>${existingNodesString}</EXISTING_NODES>`
                 }
             ],
-            max_tokens: 250
+            max_tokens: 500
         });
         console.log(response.choices[0].message.content.trim());
         res.json({ result: response.choices[0].message.content.trim() });

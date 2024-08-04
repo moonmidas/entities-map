@@ -1,11 +1,11 @@
-async function queryLLM(prompt, parentNodes) {
+async function queryLLM(prompt, parentNodes, existingNodes) {
     try {
         const response = await fetch('http://localhost:3000/query-llm', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ prompt, parentNodes })
+            body: JSON.stringify({ prompt, parentNodes, existingNodes })
         });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -99,32 +99,29 @@ function getWikiLinks(element) {
  * Given a page title, get the first paragraph links, as well as the name of the page it redirected
  * to.
  */
-// function getSubPages(pageName) {
-//   return getPageHtml(pageName).then(({ document: doc, redirectedTo }) => ({
-//     redirectedTo,
-//     links: getWikiLinks(getFirstParagraph(doc)),
-//   }));
-// }
 
 async function getSubPages(pageName, parentNodes = []) {
     const prompt = `${pageName}`;
     console.log("Parents Nodes in getSubPages:", parentNodes)
-    const response = await queryLLM(prompt, parentNodes);
+    let existingNodes = [];
+    if (typeof nodes !== 'undefined' && nodes.get) {
+        existingNodes = nodes.get().map(node => node.label);
+    }
+    const response = await queryLLM(prompt, parentNodes, existingNodes);
     const links = response.split('\n').map(item => {
-        const [entity, strength, relatedNodes] = item.trim().split('|');
+        const [entity, strength, relatedNodes, mergedWith] = item.trim().split('|');
         const relatedNodesMap = relatedNodes ? relatedNodes.split(',').reduce((acc, rel) => {
             const [node, str] = rel.split(':');
             acc[node] = parseFloat(str);
             return acc;
         }, {}) : {};
-        return { entity, strength: parseFloat(strength), relatedNodes: relatedNodesMap };
+        return { entity, strength: parseFloat(strength), relatedNodes: relatedNodesMap, mergedWith };
     }).filter(item => item.entity);
     return {
         redirectedTo: pageName,
         links: links
     };
 }
-
 
 /**
  * Get the name of a random Wikipedia article
@@ -379,44 +376,6 @@ function renameNode(oldId, newName) {
 }
 
 // Callback to add to a node once data is recieved
-// function expandNodeCallback(page, data) {
-//   const node = nodes.get(page); // The node that was clicked
-//   const level = node.level + 1; // Level for new nodes is one more than parent
-//   const subpages = data;
-
-//   // Add all children to network
-//   const subnodes = [];
-//   const newedges = [];
-//   // Where new nodes should be spawned
-//   const [x, y] = getSpawnPosition(page);
-//   // Create node objects
-//   for (let i = 0; i < subpages.length; i += 1) {
-//     const subpage = subpages[i];
-//     const subpageID = getNormalizedId(subpage);
-//     if (!nodes.getIds().includes(subpageID)) { // Don't add if node exists
-//       subnodes.push({
-//         id: subpageID,
-//         label: wordwrap(decodeURIComponent(subpage), 15),
-//         value: 1,
-//         level,
-//         color: getColor(level),
-//         parent: page,
-//         x,
-//         y,
-//       });
-//     }
-
-//     if (!getEdgeConnecting(page, subpageID)) { // Don't create duplicate edges in same direction
-//       newedges.push({
-//         from: page,
-//         to: subpageID,
-//         color: getEdgeColor(level),
-//         level,
-//         selectionWidth: 2,
-//         hoverWidth: 0,
-//       });
-//     }
-//   }
 
 //   // Add the new components to the datasets for the graph
 //   nodes.add(subnodes);
@@ -433,47 +392,53 @@ function expandNodeCallback(page, data) {
     const [x, y] = getSpawnPosition(page);
 
     subpages.forEach(subpage => {
-      const subpageID = getNormalizedId(subpage.entity);
-      if (!nodes.getIds().includes(subpageID)) {
-        subnodes.push({
-          id: subpageID,
-          label: wordwrap(subpage.entity, 15),
-          value: 1,
-          level,
-          color: getColor(level),
-          parent: page,
-          x,
-          y,
-        });
-      }
-
-      if (!getEdgeConnecting(page, subpageID)) {
-        newedges.push({
-          from: page,
-          to: subpageID,
-          color: getEdgeColorByStrength(subpage.strength),
-          level,
-          selectionWidth: 2,
-          hoverWidth: 0,
-          strength: subpage.strength
-        });
-      }
-
-      // Add edges for related nodes, excluding the parent
-      Object.entries(subpage.relatedNodes).forEach(([relatedNode, strength]) => {
-        const relatedNodeID = getNormalizedId(relatedNode);
-        if (relatedNodeID !== page && nodes.getIds().includes(relatedNodeID) && !getEdgeConnecting(subpageID, relatedNodeID)) {
-          newedges.push({
-            from: subpageID,
-            to: relatedNodeID,
-            color: getEdgeColorByStrength(strength),
-            level: Math.min(nodes.get(relatedNodeID).level, level),
-            selectionWidth: 2,
-            hoverWidth: 0,
-            strength: strength
-          });
+        let subpageID;
+        if (subpage.mergedWith) {
+            // Use the existing node
+            subpageID = getNormalizedId(subpage.mergedWith);
+        } else {
+            subpageID = getNormalizedId(subpage.entity);
+            if (!nodes.getIds().includes(subpageID)) {
+                subnodes.push({
+                    id: subpageID,
+                    label: wordwrap(subpage.entity, 15),
+                    value: 1,
+                    level,
+                    color: getColor(level),
+                    parent: page,
+                    x,
+                    y,
+                });
+            }
         }
-      });
+
+        if (!getEdgeConnecting(page, subpageID)) {
+            newedges.push({
+                from: page,
+                to: subpageID,
+                color: getEdgeColorByStrength(subpage.strength),
+                level,
+                selectionWidth: 2,
+                hoverWidth: 0,
+                strength: subpage.strength
+            });
+        }
+
+        // Add edges for related nodes, excluding the parent
+        Object.entries(subpage.relatedNodes).forEach(([relatedNode, strength]) => {
+            const relatedNodeID = getNormalizedId(relatedNode);
+            if (relatedNodeID !== page && nodes.getIds().includes(relatedNodeID) && !getEdgeConnecting(subpageID, relatedNodeID)) {
+                newedges.push({
+                    from: subpageID,
+                    to: relatedNodeID,
+                    color: getEdgeColorByStrength(strength),
+                    level: Math.min(nodes.get(relatedNodeID).level, level),
+                    selectionWidth: 2,
+                    hoverWidth: 0,
+                    strength: strength
+                });
+            }
+        });
     });
 
     nodes.add(subnodes);
@@ -743,11 +708,11 @@ const options = {
   physics: {
     enabled: true,
     barnesHut: {
-        gravitationalConstant: -10000,
+        gravitationalConstant: -5000,
         centralGravity: 0.3,
-        springLength: 30,
+        springLength: 70,
         springConstant: 0.05,
-        damping: 0.09,
+        damping: 0.4,
         avoidOverlap: 1
     },
     solver: 'barnesHut'
@@ -1434,22 +1399,28 @@ document.querySelector('#submit').textContent = 'Explore';
 
 // Function to show the expand menu with the expand topic button
 function showExpandMenu(nodeId) {
-    const menu = document.getElementById('menu');
-    const expandTopicButton = document.getElementById('expand-topic');
-    expandTopicButton.style.display = 'block';
-    const expandTopicWithParentNodesButton = document.getElementById('expand-topic-parent-nodes');
-    expandTopicWithParentNodesButton.style.display = 'block';
-    const topicName = document.getElementById('topic-name');
-    topicName.innerText = nodeId;
-    topicName.style.display = 'block';
-  
-    expandTopicWithParentNodesButton.onclick = function() {
-      expandNodeWithParentNodes(nodeId);
+  const menu = document.getElementById('menu');
+  const expandTopicButton = document.getElementById('expand-topic');
+  expandTopicButton.style.display = 'block';
+  const expandTopicWithParentNodesButton = document.getElementById('expand-topic-parent-nodes');
+  expandTopicWithParentNodesButton.style.display = 'block';
+  const expandTopicWithConnectedButton = document.getElementById('expand-topic-connected');
+  expandTopicWithConnectedButton.style.display = 'block';
+  const topicName = document.getElementById('topic-name');
+  topicName.innerText = nodeId;
+  topicName.style.display = 'block';
+
+  expandTopicWithParentNodesButton.onclick = function() {
+    expandNodeWithParentNodes(nodeId);
+  };
+
+  expandTopicWithConnectedButton.onclick = function() {
+    expandNodeWithConnected(nodeId);
+  };
+  expandTopicButton.onclick = function() {
+      expandNode(nodeId);
     };
-    expandTopicButton.onclick = function() {
-        expandNode(nodeId);
-      };
-  }
+}
 
   // Event handler for node click
 function onNodeClick(params) {
@@ -1458,3 +1429,43 @@ function onNodeClick(params) {
       showExpandMenu(nodeId);
     }
   }
+
+// Expands node using its direct links
+function getConnectedNodes(nodeId) {
+  const connectedNodes = new Set();
+  edges.forEach(edge => {
+    if (edge.from === nodeId) {
+      connectedNodes.add(edge.to);
+    }
+    if (edge.to === nodeId) {
+      connectedNodes.add(edge.from);
+    }
+  });
+  return Array.from(connectedNodes);
+}
+
+async function expandNodeWithConnected(id) {
+  const node = nodes.get(id);
+  const connectedNodes = getConnectedNodes(id);
+  const pagename = unwrap(node.label);
+  const connectedLabels = connectedNodes.map(nodeId => unwrap(nodes.get(nodeId).label));
+  
+  // Get existing nodes for context
+  let existingNodes = [];
+  if (typeof nodes !== 'undefined' && nodes.get) {
+    existingNodes = nodes.get().map(node => node.label);
+  }
+
+  // Expand the main node, using connected nodes as context
+  const { redirectedTo, links } = await getSubPages(pagename, connectedLabels, existingNodes);
+  const newId = renameNode(id, redirectedTo);
+  
+  // Update the main node
+  expandNodeCallback(newId, links);
+  nodes.update({ id: newId, expanded: true });
+  
+  // Mark connected nodes as expanded without actually expanding them
+  connectedNodes.forEach((connectedId) => {
+    nodes.update({ id: connectedId, expanded: true });
+  });
+}
